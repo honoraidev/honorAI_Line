@@ -8,6 +8,7 @@ try {
 const express = require('express');
 const { line, config, client, getConversationId, getDisplayName } = require('./line');
 const db = require('./db');
+const { adminAuth, listConversations, listMessages, listSummaries } = require('./admin');
 const {
   startScheduler,
   runSummaryJob,
@@ -41,6 +42,10 @@ const {
 } = require('./assistant');
 
 const SUMMARY_KEYWORD = process.env.SUMMARY_KEYWORD || '摘要';
+const WELCOME_NOTICE_TEXT =
+  '大家好！我是「丞石建築 AI 機器人」，很高興加入此對話。\n\n' +
+  '我是來協助紀錄群組中的重要聊天內容，並自動統整重點、待辦事項與重要決議；每天晚上 19:00，也會統整當日討論內容，讓公司團隊能快速掌握溝通脈絡、明確確認需求與後續執行方向，減少資訊遺漏與重複溝通。\n\n' +
+  '本群組由公司官方帳號進行訊息留存，作為案件管理、交接、爭議處理與稽核用途。已接收並留存的訊息，即使日後在 LINE 中被收回，系統仍可能保留原始紀錄；相關紀錄僅限授權人員依業務需要調閱。';
 const HISTORY_KEYWORDS = ['歷史紀錄', '歷史記錄', '查歷史', '總結歷史', '摘要歷史'];
 const MENU_KEYWORDS = ['選單', '功能', '按鈕', 'menu', 'help', '說明', '開始', '控制台'];
 const NOTES_LIST_KEYWORDS = [
@@ -110,6 +115,37 @@ const SUMMARY_DISABLE_KEYWORDS = [
 
 const app = express();
 
+app.get('/admin', adminAuth, (req, res) => {
+  res.sendFile(require('node:path').join(__dirname, '..', 'public', 'admin.html'));
+});
+
+app.get('/api/admin/conversations', adminAuth, async (req, res) => {
+  try {
+    res.json(await listConversations(req.query));
+  } catch (err) {
+    console.error('[admin] conversation query error:', err.message);
+    res.status(500).json({ error: '無法讀取對話資料。請確認 MySQL 連線與同步狀態。' });
+  }
+});
+
+app.get('/api/admin/messages', adminAuth, async (req, res) => {
+  try {
+    res.json(await listMessages(req.query));
+  } catch (err) {
+    console.error('[admin] message query error:', err.message);
+    res.status(400).json({ error: err.message || '無法讀取訊息資料。' });
+  }
+});
+
+app.get('/api/admin/summaries', adminAuth, async (req, res) => {
+  try {
+    res.json(await listSummaries(req.query));
+  } catch (err) {
+    console.error('[admin] summary query error:', err.message);
+    res.status(500).json({ error: '無法讀取摘要資料。請確認 MySQL 連線與同步狀態。' });
+  }
+});
+
 // 同一個對話的事件依序處理（避免同時收到多筆訊息時競速）
 const conversationQueues = new Map();
 
@@ -127,14 +163,17 @@ app.post('/webhook', line.middleware(config), async (req, res) => {
     const conversationId = getConversationId(event.source);
     await db.registerConversation(conversationId);
 
-    // 處理加好友或加入群組事件，立即回傳曜石黑頂級歡迎與功能導引卡片
+    // 處理加好友或加入群組事件，先發送歡迎與留存告知，再回傳功能導引卡片
     if (event.type === 'follow' || event.type === 'join') {
       try {
         await client.replyMessage({
           replyToken: event.replyToken,
-          messages: [createWelcomeFlex()],
+          messages: [
+            { type: 'text', text: WELCOME_NOTICE_TEXT },
+            createWelcomeFlex(),
+          ],
         });
-        console.log(`[webhook] sent welcome card for ${event.type} to ${conversationId}`);
+        console.log(`[webhook] sent welcome notice and card for ${event.type} to ${conversationId}`);
       } catch (err) {
         console.error('[webhook] error sending welcome card:', err.message);
       }
@@ -155,10 +194,45 @@ app.post('/webhook', line.middleware(config), async (req, res) => {
   }
 });
 
+function getStoredMessageText(message) {
+  if (message.type === 'text') return message.text || '';
+  if (message.type === 'image') return '[圖片訊息]';
+  if (message.type === 'audio') return '[語音訊息]';
+  if (message.type === 'video') return '[影片訊息]';
+  if (message.type === 'file') return `[檔案：${message.fileName || '未命名檔案'}]`;
+  if (message.type === 'sticker') return `[貼圖：${message.packageId || ''}/${message.stickerId || ''}]`;
+  if (message.type === 'location') return `[位置：${message.title || ''} ${message.address || ''}]`.trim();
+  return `[${message.type || '未知'}訊息]`;
+}
+
+async function recordIncomingMessage(event, conversationId) {
+  let displayName = null;
+  try {
+    displayName = await getDisplayName(event.source);
+  } catch (err) {
+    console.error('[webhook] display-name lookup error:', err.message);
+  }
+
+  const stored = await db.appendIncomingMessage(conversationId, {
+    messageId: event.message.id,
+    messageType: event.message.type,
+    userId: event.source.userId,
+    displayName,
+    text: getStoredMessageText(event.message),
+    timestamp: event.timestamp,
+    rawMessage: event.message,
+  });
+  if (!stored) console.log(`[webhook] skipped duplicate message ${event.message.id}`);
+}
+
 async function handleEvent(event, conversationId) {
   const messageType = event.message.type;
   let textContent = null;
   let replyMessages = [];
+
+  // Persist before command handling. This includes every early-return path,
+  // such as settings, menus, notes, and manual-summary commands.
+  await recordIncomingMessage(event, conversationId);
 
   if (messageType === 'text') {
     const rawText = event.message.text.trim();
@@ -372,18 +446,7 @@ async function handleEvent(event, conversationId) {
       })
     : Promise.resolve();
 
-  // 2. 非同步背景寫入訊息庫，不阻塞用戶即時體感
-  const dbPromise = (async () => {
-    const authorName = await getDisplayName(event.source);
-    await db.appendMessage(conversationId, {
-      userId: event.source.userId,
-      displayName: authorName,
-      text: textContent,
-      timestamp: event.timestamp,
-    });
-  })().catch((err) => console.error('[webhook] appendMessage error:', err.message));
-
-  await Promise.all([replyPromise, dbPromise]);
+  await replyPromise;
 }
 
 async function replyImmediateMenu(replyToken) {

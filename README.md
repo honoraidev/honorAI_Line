@@ -111,6 +111,16 @@ curl -X POST http://localhost:3000/tasks/summary
      （Node路徑用 `which node` 或DSM套件安裝路徑確認；`logs/` 資料夾需自行建立）
 4. 也可先手動跑一次確認連線正常：`npm run sync`
 
+## 聊天紀錄管理後台
+
+完成逐筆訊息同步後，可開啟 `https://你的服務/admin` 查看管理後台。後台支援依日期、關鍵字、人員或對話 ID 查詢，並可檢視指定對話的訊息時間軸與摘要紀錄。
+
+1. 在執行後台的環境設定 `ADMIN_USERNAME` 與強密碼 `ADMIN_PASSWORD`。
+2. 同一環境也必須能連上 NAS MySQL，並設定 `MYSQL_HOST`、`MYSQL_PORT`、`MYSQL_USER`、`MYSQL_PASSWORD`、`MYSQL_DATABASE`。
+3. 以 `npm run sync` 定期把 Redis 的訊息同步至 MySQL；建議每小時執行一次。
+
+後台使用 HTTP Basic Auth 保護，務必只透過 HTTPS 開放，並建議部署於 NAS、內網伺服器或經 VPN 存取的環境。若目前 bot 部署在 Render，而 MySQL 只開放內網，請不要直接把 MySQL 對外開放；應在可連到 NAS 的內網主機執行後台，或透過 VPN／私有網路連線。
+
 ## 環境變數說明
 
 見 `.env.example`，重點有：

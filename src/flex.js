@@ -2634,7 +2634,7 @@ function createWelcomeFlex() {
         },
         {
           type: 'text',
-          text: '您好！我是您的專屬建築智庫「大大」',
+          text: '大家好！我是「丞石建築 AI 機器人」，很高興加入此對話。\n\n我是來協助紀錄群組中的重要聊天內容，並自動統整重點、待辦事項與重要決議；每天晚上 19:00，也會統整當日討論內容，讓公司團隊能快速掌握溝通脈絡、明確確認需求與後續執行方向，減少資訊遺漏與重複溝通。',
           weight: 'bold',
           size: 'lg', color: THEME.headerTitle, wrap: true, margin: 'md',
         },
@@ -2657,14 +2657,14 @@ function createWelcomeFlex() {
           contents: [
             {
               type: 'text',
-              text: '🤖 隨時互動諮詢方式',
+              text: '🏛️ 我加入群組的目的',
               size: 'xs',
               weight: 'bold',
               color: THEME.titleText,
             },
             {
               type: 'text',
-              text: '• 1對1私聊：直接傳送任何問題、圖片或語音\n• 群組對話：呼叫「大大」、「@AI」、「請問」、「請教」或「幫我」即可觸發諮詢',
+              text: '我的主要工作是協助團隊完整紀錄群組中的聊天內容，並將分散的討論統整為清楚的重點、客戶需求、待辦事項與重要決議。\n\n透過有系統地保留討論脈絡，讓團隊能快速確認客戶需求、掌握後續執行方向，降低資訊遺漏與重複溝通的情況。',
               size: 'xs',
               color: THEME.bodyText,
               wrap: true,
@@ -2684,14 +2684,41 @@ function createWelcomeFlex() {
           contents: [
             {
               type: 'text',
-              text: '⚡ 核心功能導引',
+              text: '🔒 訊息留存與調閱說明',
               size: 'xs',
               weight: 'bold',
               color: THEME.titleText,
             },
             {
               type: 'text',
-              text: '1. 🗓️ 19:00 全天對話與待辦深度總結\n2. 📝 智能記事：「記下：明天上午9點會勘」\n3. 📋 查看待辦：輸入「看記事」\n4. 📊 跨維度統整：輸入「智能統整」',
+              text: '本群組由公司官方帳號進行訊息留存，作為案件管理、交接、爭議處理與稽核用途。已接收並留存的訊息，即使日後在 LINE 中被收回，系統仍可能保留原始紀錄；相關紀錄僅限授權人員依業務需要調閱。',
+              size: 'xs',
+              color: THEME.bodyText,
+              wrap: true,
+              margin: 'sm',
+            },
+          ],
+        },
+        {
+          type: 'box',
+          layout: 'vertical',
+          margin: 'md',
+          paddingAll: '12px',
+          backgroundColor: THEME.cardBg,
+          cornerRadius: '10px',
+          borderWidth: '1px',
+          borderColor: THEME.cardBorder,
+          contents: [
+            {
+              type: 'text',
+              text: '⚡ 您可以這樣使用我',
+              size: 'xs',
+              weight: 'bold',
+              color: THEME.titleText,
+            },
+            {
+              type: 'text',
+              text: '1. 🗓️ 每日 19:00 自動統整全天的聊天重點與待辦事項\n2. 📝 需要即時整理時，可輸入「摘要」取得目前對話重點\n3. 📝 要記錄事項時，可輸入「記下：明天上午 9 點會勘」\n4. 📋 輸入「看記事」查看待辦；輸入「智能統整」進行跨面向整理\n5. 💬 如需建築、工程或專案協助，可呼叫「大大」、「@AI」、「請問」、「請教」或「幫我」開始提問',
               size: 'xs',
               color: THEME.bodyText,
               wrap: true,
@@ -2737,7 +2764,7 @@ function createWelcomeFlex() {
 
   return {
     type: 'flex',
-    altText: '🏛️ 您好！我是您的專屬建築智庫與特助「大大」',
+    altText: '🏛️ 您好！我是「丞石建築 AI 機器人」',
     contents: bubble,
     quickReply: getQuickReply(),
   };

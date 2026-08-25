@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>丞石建築｜聊天紀錄後台</title>
+  <style>
+    :root { color-scheme: light; font-family: system-ui, -apple-system, "Noto Sans TC", sans-serif; color: #1f2937; background: #f5f6f8; }
+    body { margin: 0; } header { padding: 20px 28px; background: #1e293b; color: #fff; } h1 { font-size: 20px; margin: 0 0 4px; } header p { margin: 0; color: #cbd5e1; font-size: 13px; }
+    main { max-width: 1440px; margin: 0 auto; padding: 20px; } .filters, .panel { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 16px; box-shadow: 0 1px 2px #0000000a; }
+    .filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; } label { font-size: 12px; color: #475569; display: grid; gap: 4px; } input { border: 1px solid #cbd5e1; border-radius: 6px; padding: 8px; font: inherit; min-width: 130px; } button { border: 0; border-radius: 6px; padding: 9px 13px; background: #0f766e; color: #fff; cursor: pointer; font: inherit; } button.secondary { background: #64748b; }
+    .grid { display: grid; grid-template-columns: 360px minmax(0, 1fr); gap: 16px; margin-top: 16px; } .panel { min-width: 0; } h2 { font-size: 16px; margin: 0 0 12px; } .list { max-height: 650px; overflow: auto; } .conversation { width: 100%; text-align: left; color: #1f2937; background: transparent; border-radius: 0; border-bottom: 1px solid #e5e7eb; padding: 12px 4px; } .conversation.active { color: #0f766e; background: #f0fdfa; } .muted { color: #64748b; font-size: 12px; } .message { padding: 11px 0; border-bottom: 1px solid #e5e7eb; } .message-head { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; } .message-text { white-space: pre-wrap; line-height: 1.55; margin-top: 6px; }
+    .summary { border-left: 3px solid #0f766e; padding: 8px 12px; margin: 10px 0; white-space: pre-wrap; line-height: 1.55; background: #f8fafc; } #status { margin: 10px 0; color: #b45309; } .actions { margin-top: 12px; display: flex; gap: 8px; } @media (max-width: 850px) { .grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <header><h1>丞石建築 AI 機器人｜聊天紀錄後台</h1><p>授權人員專用：查詢、回溯與檢視案件溝通脈絡</p></header>
+  <main>
+    <section class="filters">
+      <label>起始日期<input id="from" type="date"></label>
+      <label>結束日期<input id="to" type="date"></label>
+      <label>關鍵字／人員／對話 ID<input id="q" placeholder="例如：王小明、會勘"></label>
+      <button id="search">查詢</button><button class="secondary" id="today">今天</button>
+    </section>
+    <div id="status"></div>
+    <section class="grid">
+      <aside class="panel"><h2>對話列表</h2><div class="list" id="conversations"></div></aside>
+      <section class="panel"><h2 id="title">請從左側選擇對話</h2><div id="summaries"></div><div class="list" id="messages"></div><div class="actions"><button id="more" hidden>載入更多訊息</button></div></section>
+    </section>
+  </main>
+  <script>
+    const state = { conversationId: '', offset: 0 };
+    const $ = id => document.getElementById(id);
+    const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+    const params = () => new URLSearchParams({ from: $('from').value, to: $('to').value, q: $('q').value });
+    const date = value => new Date(value).toLocaleString('zh-TW', { hour12: false });
+    async function request(path) { const res = await fetch(path); const data = await res.json(); if (!res.ok) throw new Error(data.error || '查詢失敗'); return data; }
+    async function loadConversations() {
+      $('status').textContent = '查詢中…'; state.conversationId = ''; $('messages').innerHTML = ''; $('summaries').innerHTML = ''; $('title').textContent = '請從左側選擇對話';
+      try { const rows = await request('/api/admin/conversations?' + params()); $('conversations').innerHTML = rows.length ? rows.map(row => `<button class="conversation" data-id="${esc(row.conversation_id)}"><strong>${esc(row.participants || row.conversation_id)}</strong><br><span class="muted">${esc(row.conversation_id)} · ${row.message_count} 則 · ${date(row.last_message_at)}</span></button>`).join('') : '<p class="muted">沒有符合條件的對話。</p>'; $('status').textContent = `找到 ${rows.length} 個對話`; document.querySelectorAll('.conversation').forEach(el => el.onclick = () => selectConversation(el.dataset.id, el)); } catch (err) { $('status').textContent = err.message; }
+    }
+    async function selectConversation(id, button) { document.querySelectorAll('.conversation').forEach(el => el.classList.remove('active')); button.classList.add('active'); state.conversationId = id; state.offset = 0; $('title').textContent = id; $('messages').innerHTML = ''; await Promise.all([loadMessages(), loadSummaries()]); }
+    async function loadMessages() { if (!state.conversationId) return; const query = params(); query.set('conversationId', state.conversationId); query.set('offset', state.offset); query.set('limit', 100); try { const rows = await request('/api/admin/messages?' + query); $('messages').insertAdjacentHTML('beforeend', rows.map(row => `<article class="message"><div class="message-head"><strong>${esc(row.display_name || '未知使用者')}</strong><span class="muted">${esc(row.message_type)} · ${date(row.sent_at)}</span></div><div class="message-text">${esc(row.message_text)}</div></article>`).join('')); state.offset += rows.length; $('more').hidden = rows.length < 100; } catch (err) { $('status').textContent = err.message; } }
+    async function loadSummaries() { const query = params(); query.set('conversationId', state.conversationId); try { const rows = await request('/api/admin/summaries?' + query); $('summaries').innerHTML = rows.length ? `<h2>摘要紀錄</h2>${rows.map(row => `<div class="summary"><strong>${date(row.generated_at)} · ${row.message_count} 則</strong><br>${esc(row.summary)}</div>`).join('')}` : ''; } catch (err) { $('status').textContent = err.message; } }
+    $('search').onclick = loadConversations; $('today').onclick = () => { const today = new Date().toISOString().slice(0, 10); $('from').value = today; $('to').value = today; loadConversations(); }; $('more').onclick = loadMessages; loadConversations();
+  </script>
+</body>
+</html>

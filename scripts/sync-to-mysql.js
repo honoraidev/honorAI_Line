@@ -11,6 +11,8 @@ const redis = new Redis({
 });
 
 const HISTORY_KEY = 'linechat:history';
+const MESSAGE_KEY_PREFIX = 'linechat:messages:';
+const CONVERSATIONS_SET_KEY = 'linechat:conversations';
 const MAX_RECORDS_PER_RUN = 500;
 
 function sourceTypeOf(conversationId) {
@@ -31,6 +33,60 @@ async function ensureTable(conn) {
       UNIQUE KEY uniq_conversation_generated (conversation_id, generated_at)
     ) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci
   `);
+  await conn.query(`
+    CREATE TABLE IF NOT EXISTS conversation_messages (
+      id BIGINT AUTO_INCREMENT PRIMARY KEY,
+      message_id VARCHAR(255) NOT NULL,
+      conversation_id VARCHAR(255) NOT NULL,
+      source_type VARCHAR(16) NOT NULL,
+      line_user_id VARCHAR(255) NULL,
+      display_name VARCHAR(255) NULL,
+      message_type VARCHAR(32) NOT NULL,
+      message_text LONGTEXT NOT NULL,
+      raw_message_json LONGTEXT NULL,
+      sent_at DATETIME(3) NOT NULL,
+      synced_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY uniq_message_id (message_id),
+      KEY idx_conversation_sent_at (conversation_id, sent_at)
+    ) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci
+  `);
+}
+
+async function syncMessages(conn) {
+  const registered = (await redis.smembers(CONVERSATIONS_SET_KEY).catch(() => [])) || [];
+  const keys = (await redis.keys(`${MESSAGE_KEY_PREFIX}*`).catch(() => [])) || [];
+  const conversationIds = Array.from(new Set([
+    ...registered,
+    ...keys.map((key) => key.slice(MESSAGE_KEY_PREFIX.length)),
+  ]));
+  let synced = 0;
+
+  for (const conversationId of conversationIds) {
+    const rawMessages = (await redis.lrange(MESSAGE_KEY_PREFIX + conversationId, 0, -1)) || [];
+    for (const raw of rawMessages) {
+      const message = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      if (!message?.messageId) continue;
+      const [result] = await conn.query(
+        `INSERT IGNORE INTO conversation_messages
+         (message_id, conversation_id, source_type, line_user_id, display_name,
+          message_type, message_text, raw_message_json, sent_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          message.messageId,
+          conversationId,
+          sourceTypeOf(conversationId),
+          message.userId || null,
+          message.displayName || null,
+          message.messageType || 'unknown',
+          message.text || '',
+          message.rawMessage ? JSON.stringify(message.rawMessage) : null,
+          new Date(message.timestamp),
+        ]
+      );
+      synced += result.affectedRows || 0;
+    }
+  }
+  return synced;
 }
 
 async function run() {
@@ -45,7 +101,9 @@ async function run() {
   await ensureTable(conn);
 
   let synced = 0;
+  let syncedMessages = 0;
   try {
+    syncedMessages = await syncMessages(conn);
     for (let i = 0; i < MAX_RECORDS_PER_RUN; i++) {
       const raw = await redis.lindex(HISTORY_KEY, 0);
       if (!raw) break;
@@ -74,7 +132,7 @@ async function run() {
     await conn.end();
   }
 
-  console.log(`[sync] synced ${synced} record(s) to MySQL at ${new Date().toISOString()}`);
+  console.log(`[sync] synced ${syncedMessages} message(s) and ${synced} summary record(s) to MySQL at ${new Date().toISOString()}`);
 }
 
 run().catch((err) => {

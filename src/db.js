@@ -6,6 +6,7 @@ const redis = new Redis({
 });
 
 const KEY_PREFIX = 'linechat:messages:';
+const MESSAGE_DEDUP_PREFIX = 'linechat:message-dedup:';
 const HISTORY_KEY = 'linechat:history';
 const CONVERSATIONS_SET_KEY = 'linechat:conversations';
 const registeredConversations = new Set();
@@ -26,6 +27,31 @@ async function registerConversation(conversationId) {
 async function appendMessage(conversationId, message) {
   await registerConversation(conversationId);
   await redis.rpush(KEY_PREFIX + conversationId, JSON.stringify(message));
+}
+
+// LINE may redeliver the same webhook. Persist each inbound LINE message once
+// while retaining every distinct message, including commands.
+async function appendIncomingMessage(conversationId, message) {
+  await registerConversation(conversationId);
+  if (!message.messageId) {
+    await redis.rpush(KEY_PREFIX + conversationId, JSON.stringify(message));
+    return true;
+  }
+
+  const dedupKey = MESSAGE_DEDUP_PREFIX + message.messageId;
+  const claimed = await redis.set(dedupKey, conversationId, {
+    nx: true,
+    ex: 30 * 24 * 60 * 60,
+  });
+  if (claimed !== 'OK' && claimed !== true) return false;
+
+  try {
+    await redis.rpush(KEY_PREFIX + conversationId, JSON.stringify(message));
+    return true;
+  } catch (err) {
+    await redis.del(dedupKey).catch(() => {});
+    throw err;
+  }
 }
 
 async function getMessages(conversationId) {
@@ -387,6 +413,7 @@ async function getMessagesSinceSummaryCursor(conversationId, endAt = Date.now())
 module.exports = {
   registerConversation,
   appendMessage,
+  appendIncomingMessage,
   getMessages,
   getRecentMessages,
   getTodayMessages,
@@ -417,4 +444,3 @@ module.exports = {
   SETTINGS_PREFIX,
   SUMMARY_CURSOR_PREFIX,
 };
-
