@@ -27,11 +27,17 @@ async function runSummaryJob() {
   console.log('[summary-job] Starting daily conversation summary push...');
   const conversationIds = await db.getSummarySubscriberIds();
   console.log(`[summary-job] Found ${conversationIds.length} subscribed conversation(s) for summary.`);
+  // Keep a fixed cutoff for this run. Messages received during summarisation
+  // remain after the cutoff and will be handled by the following run.
+  const runCutoffAt = Date.now();
 
   for (const conversationId of conversationIds) {
-    const messages = await db.getTodayMessages(conversationId);
+    const { messages, startAt } = await db.getMessagesSinceSummaryCursor(conversationId, runCutoffAt);
     if (!messages.length) {
-      console.log(`[summary] No messages found today for ${conversationId}`);
+      // Advance an empty window as well, so a quiet conversation does not keep
+      // falling back to the initial 24-hour window.
+      await db.setSummaryCursor(conversationId, runCutoffAt);
+      console.log(`[summary] No new messages for ${conversationId}; cursor advanced.`);
       continue;
     }
 
@@ -59,7 +65,12 @@ async function runSummaryJob() {
         messages,
         summary,
         generatedAt: new Date().toISOString(),
+        windowStartAt: new Date(startAt).toISOString(),
+        windowEndAt: new Date(runCutoffAt).toISOString(),
       });
+      // Do this only after successful delivery and archiving. A failed push is
+      // therefore still eligible for the next scheduled summary.
+      await db.setSummaryCursor(conversationId, runCutoffAt);
       // 清理超過 3 天的舊紀錄，保留最近對話供查閱與 AI 諮詢
       await db.pruneOldMessages(conversationId, 3);
       console.log(`[summary] pushed & archived for ${conversationId} (${messages.length} messages)`);

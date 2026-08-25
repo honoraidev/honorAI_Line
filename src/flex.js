@@ -2781,7 +2781,7 @@ function createSettingsFlex(settings = { newsEnabled: false, summaryEnabled: tru
   const newsBtnText = settings.newsEnabled ? '關閉新聞' : '開啟新聞';
   const newsBtnStyle = settings.newsEnabled ? 'secondary' : 'primary';
 
-  const summaryStatusText = settings.summaryEnabled ? '🟢 每日 21:00 準時推播' : '⚪ 已關閉推播';
+  const summaryStatusText = settings.summaryEnabled ? '🟢 每日 19:00 準時推播' : '⚪ 已關閉推播';
   const summaryBtnText = settings.summaryEnabled ? '關閉摘要' : '開啟摘要';
   const summaryBtnStyle = settings.summaryEnabled ? 'secondary' : 'primary';
 
@@ -2916,7 +2916,7 @@ function createSettingsFlex(settings = { newsEnabled: false, summaryEnabled: tru
               contents: [
                 {
                   type: 'text',
-                  text: '📋 晚間對話總結 (21:00)',
+                  text: '📋 晚間對話總結 (19:00)',
                   weight: 'bold',
                   size: 'sm',
                   color: THEME.titleText,

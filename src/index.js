@@ -265,26 +265,18 @@ async function handleEvent(event, conversationId) {
       // 判斷是否為 1對1 私聊
       const isOneOnOne = event.source.type === 'user';
 
-      // 支援 LINE 原生 @ 標註 (mentionees)
-      const hasNativeMention = Boolean(
-        event.message.mention &&
-        event.message.mention.mentionees &&
-        event.message.mention.mentionees.length > 0
-      );
+      // 嚴格判斷 @AI 標註（支援 @AI、@ai、＠AI、＠ai）。
+      // 群組內的 LINE 原生 @ 標註可能是其他成員，不能拿來當作 AI 觸發條件。
+      const hasAiMention = /(?:^|\s)[@＠]\s*ai(?=$|[\s:：])/i.test(rawText);
 
-      // 嚴格判斷 @AI 標註（支援 @AI、@ai、＠AI、＠ai）
-      const hasAiMention = /[@＠]ai/i.test(rawText);
-
-      // 群組中僅在輸入 @AI 或原生 @ 標註時觸發；私聊則直接輸入即可提問
-      const isAiTrigger = isOneOnOne || hasAiMention || hasNativeMention;
+      // 群組中僅在輸入 @AI 時觸發；私聊則直接輸入即可提問。
+      const isAiTrigger = isOneOnOne || hasAiMention;
 
       if (isAiTrigger) {
         // 精準提取 @AI 後面的題目文字（例：「@AI 介紹什麼是RC?」 -> 「介紹什麼是RC?」）
         let cleanQuestion = rawText;
         if (hasAiMention) {
-          cleanQuestion = rawText.replace(/^.*?[@＠]ai[:：\s]*/i, '').trim();
-        } else if (hasNativeMention) {
-          cleanQuestion = rawText.replace(/^[@＠][^\s]+[:：\s]*/, '').trim();
+          cleanQuestion = rawText.replace(/^.*?[@＠]\s*ai[:：\s]*/i, '').trim();
         }
 
         const promptQuestion = cleanQuestion || rawText.trim();
@@ -521,7 +513,11 @@ async function replyImmediateSynthesis(replyToken, conversationId, source) {
 }
 
 async function replyImmediateSummary(replyToken, conversationId) {
-  const messages = await db.getTodayMessages(conversationId);
+  // On-demand summaries use the current automatic-summary window, whose start
+  // is the last successful 19:00 run. They intentionally do not move that
+  // cursor, so repeated requests during the same cycle have the same start.
+  const requestedAt = Date.now();
+  const { messages, startAt } = await db.getMessagesSinceSummaryCursor(conversationId, requestedAt);
   if (!messages.length) {
     await client.replyMessage({
       replyToken,
@@ -566,6 +562,8 @@ async function replyImmediateSummary(replyToken, conversationId) {
     summary,
     type: 'on_demand',
     generatedAt: new Date().toISOString(),
+    windowStartAt: new Date(startAt).toISOString(),
+    windowEndAt: new Date(requestedAt).toISOString(),
   });
   console.log(`[summary] replied on-demand (retained ${messages.length} messages) for ${conversationId}`);
 }

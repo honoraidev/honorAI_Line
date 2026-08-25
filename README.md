@@ -10,12 +10,12 @@ LINE官方帳號(Messaging API) Bot：記錄收到的對話內容，用OpenAI整
    - **圖片訊息**：透過 OpenAI Vision (GPT-4o-mini) 辨識畫面主體、圖表數據與 OCR 文字
    - **語音訊息**：透過 OpenAI Whisper 語音轉文字
    - 所有訊息與摘要自動存入 Upstash Redis（依 1對1 / 群組 / 聊天室分開存放）
-2. 使用者傳送關鍵字（預設「摘要」）時，立即整理目前累積的對話並回覆
-3. 每天固定時間（預設19:00），由GitHub Actions排程呼叫 `POST /tasks/summary` 觸發整理，針對每個有新訊息的對話呼叫OpenAI摘要，用 `pushMessage` 推播回去，並清空已摘要的訊息
+2. 使用者傳送關鍵字（預設「摘要」）時，立即整理自上次晚間自動摘要起累積的對話並回覆；手動查詢不會改變晚間摘要的週期起點。
+3. 每天固定時間（預設19:00），由外部排程呼叫 `POST /tasks/summary` 觸發整理；每個對話會從上次成功推播的時間點累積至本次執行時間，再呼叫 OpenAI 摘要並以 `pushMessage` 推播。首次自動推播會回溯最近 24 小時。
 
 線上部署在Render（免費方案），因為免費instance閒置會睡著、且沒有persistent disk，所以：
 - 訊息儲存改用 Upstash Redis（獨立於instance之外，重啟不會遺失）
-- 排程改用GitHub Actions主動呼叫（而非依賴伺服器內部長駐的cron，確保instance睡著時仍會被準時叫醒）
+- 正式排程使用 cron-job.org 主動呼叫；GitHub Actions 僅保留為 19:15 的備援，因其排程可能延遲
 
 ## 前置需求
 
@@ -74,15 +74,18 @@ curl -X POST http://localhost:3000/tasks/summary
    - Instance Type：Free
    - Environment Variables：把 `.env` 裡的所有變數都加進去，`SUMMARY_TRIGGER_SECRET` 務必設定（保護觸發端點不被任意呼叫）
 3. 部署完成後拿到固定網址，回LINE Developers Console把Webhook URL改成 `https://你的服務.onrender.com/webhook`
-4. **精準秒級定時推播（推薦 cron-job.org，100% 免費且零延遲）**：
+4. **準時推播（使用 cron-job.org 作為主要排程）**：
    - 免費註冊 [cron-job.org](https://cron-job.org)
-   - 建立 1 個排程（時區選 Asia/Taipei）：
-     1. **每日 19:00 晚間總結**：
+   - 建立下列 2 個排程，時區都選 **Asia/Taipei**：
+     1. **每日 18:57 預熱服務**：
+        - URL: `https://你的服務.onrender.com/ping`
+        - Method: `GET`
+     2. **每日 19:00 晚間總結**：
         - URL: `https://你的服務.onrender.com/tasks/summary`
         - Method: `POST`
         - Header: `x-trigger-secret: 你的密鑰`
-   - *優勢：直接發起 HTTP 請求，精準在設定秒數叫醒睡眠中的 Render instance 並即時推播，徹底解決 GitHub Actions 排隊延遲 2~3 小時的問題。*
-5. 若使用 GitHub Actions：在 GitHub repo 的 **Settings → Secrets and variables → Actions** 新增 secret `SUMMARY_TRIGGER_SECRET`，workflow 也會作為備援定時觸發。
+   - 免費 Render 若已休眠，預熱請求會先完成冷啟動，避免它拖延 19:00 的摘要請求。若必須把送達時間壓到秒級，請使用不會休眠的 Render 方案（或其他常駐主機）。
+5. GitHub Actions workflow 會在 **19:15** 作備援；若 cron-job.org 已成功執行，Redis 每日鎖會自動略過它。請在 GitHub repo 的 **Settings → Secrets and variables → Actions** 新增 `SUMMARY_TRIGGER_SECRET`。
 
 ## 查詢歷史總結紀錄
 

@@ -1,9 +1,11 @@
-name: Trigger daily LINE summary
+name: Fallback daily LINE summary
 
 on:
   schedule:
-    # 11:00 UTC = 19:00 Asia/Taipei
-    - cron: '0 11 * * *'
+    # 備援：11:15 UTC = 19:15 Asia/Taipei。
+    # 正式的 19:00 觸發請交給 cron-job.org；GitHub Actions 的 scheduled
+    # workflow 不保證準點。若主要排程已完成，Redis 的每日鎖會讓此任務略過。
+    - cron: '15 11 * * *'
   workflow_dispatch: {}
 
 jobs:

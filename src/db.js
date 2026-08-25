@@ -248,6 +248,7 @@ async function clearNotes(conversationId) {
 }
 
 const SETTINGS_PREFIX = 'linechat:settings:';
+const SUMMARY_CURSOR_PREFIX = 'linechat:summary-cursor:';
 const settingsCache = new Map();
 const SETTINGS_CACHE_TTL_MS = 5 * 60 * 1000; // 快取 5 分鐘
 
@@ -347,6 +348,42 @@ async function getSummarySubscriberIds() {
   }
 }
 
+async function getSummaryCursor(conversationId) {
+  try {
+    const raw = await redis.get(SUMMARY_CURSOR_PREFIX + conversationId);
+    if (!raw) return null;
+    const timestamp = new Date(typeof raw === 'string' ? raw : String(raw)).getTime();
+    return Number.isFinite(timestamp) ? timestamp : null;
+  } catch (err) {
+    console.error('[db] getSummaryCursor error:', err.message);
+    return null;
+  }
+}
+
+async function setSummaryCursor(conversationId, timestamp) {
+  try {
+    await redis.set(SUMMARY_CURSOR_PREFIX + conversationId, new Date(timestamp).toISOString());
+  } catch (err) {
+    console.error('[db] setSummaryCursor error:', err.message);
+    throw err;
+  }
+}
+
+async function getMessagesSinceSummaryCursor(conversationId, endAt = Date.now()) {
+  const messages = await getMessages(conversationId);
+  const savedCursor = await getSummaryCursor(conversationId);
+  // On a newly subscribed conversation, start with the prior 24 hours. The
+  // cursor is advanced only by a successful automatic summary run.
+  const startAt = savedCursor ?? endAt - 24 * 60 * 60 * 1000;
+  const pending = messages.filter((m) => {
+    const timestamp = typeof m.timestamp === 'number' ? m.timestamp : new Date(m.timestamp).getTime();
+    // Including the exact boundary is preferable to ever losing a message that
+    // happens to share a timestamp with the last completed run.
+    return Number.isFinite(timestamp) && timestamp >= startAt && timestamp <= endAt;
+  });
+  return { messages: pending, startAt, endAt };
+}
+
 module.exports = {
   registerConversation,
   appendMessage,
@@ -370,12 +407,14 @@ module.exports = {
   updateConversationSettings,
   getNewsSubscriberIds,
   getSummarySubscriberIds,
+  getSummaryCursor,
+  setSummaryCursor,
+  getMessagesSinceSummaryCursor,
   HISTORY_KEY,
   CONVERSATIONS_SET_KEY,
   SEEN_NEWS_KEY,
   NOTES_PREFIX,
   SETTINGS_PREFIX,
+  SUMMARY_CURSOR_PREFIX,
 };
-
-
 
